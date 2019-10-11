@@ -1,60 +1,69 @@
-FROM debian:buster
-ENV NETATALK_VERSION 3.1.12
+FROM debian:buster as base
 
-ENV DEPS="build-essential libevent-dev libssl-dev libgcrypt-dev libkrb5-dev libpam0g-dev libwrap0-dev libdb-dev libtdb-dev libmariadb-dev-compat libavahi-client-dev libacl1-dev libldap2-dev libcrack2-dev systemtap-sdt-dev libdbus-1-dev libdbus-glib-1-dev libglib2.0-dev libtracker-sparql-2.0-dev libtracker-miner-2.0-dev file"
+ENV NETATALK_VERSION 3.1.12
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install \
-        --no-install-recommends \
-        --fix-missing \
         --assume-yes \
-        $DEPS \
-        tracker \
-        avahi-daemon \
-        curl wget \
-        &&  wget      "http://ufpr.dl.sourceforge.net/project/netatalk/netatalk/${NETATALK_VERSION}/netatalk-${NETATALK_VERSION}.tar.gz" \
-        &&  curl -SL  "http://ufpr.dl.sourceforge.net/project/netatalk/netatalk/${NETATALK_VERSION}/netatalk-${NETATALK_VERSION}.tar.gz" | tar xvz
+        apt-utils
+
+FROM base as build
+
+ENV BUILD_DEPS  \
+                build-essential \
+                dpkg-dev \
+                dh-make \
+                fakeroot \
+                libevent-dev \
+                libssl-dev \
+                libgcrypt-dev \
+                libkrb5-dev \
+                libpam0g-dev \
+                libwrap0-dev \
+                libdb-dev \
+                libtdb-dev \
+                libmariadb-dev-compat \
+                libavahi-client-dev \
+                libacl1-dev \
+                libldap2-dev \
+                libcrack2-dev \
+                systemtap-sdt-dev \
+                libdbus-1-dev \
+                libdbus-glib-1-dev \
+                libglib2.0-dev \
+                libtracker-sparql-2.0-dev \
+                libtracker-miner-2.0-dev \
+                libltdl-dev \
+                file
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN     apt-get install \
+            --no-install-recommends \
+            --fix-missing \
+            --assume-yes \
+            $BUILD_DEPS \
+            tracker \
+            avahi-daemon \
+            curl
+
+RUN     curl -sSL  http://ufpr.dl.sourceforge.net/project/netatalk/netatalk/${NETATALK_VERSION}/netatalk-${NETATALK_VERSION}.tar.gz -O \
+            && tar fxvz netatalk-${NETATALK_VERSION}.tar.gz \
+            && cd netatalk-${NETATALK_VERSION}
 
 WORKDIR netatalk-${NETATALK_VERSION}
 
-RUN ./configure \
-        --prefix=/usr \
-        --sysconfdir=/etc \
-        --with-init-style=debian-systemd \
-        --without-libevent \
-        --without-tdb \
-        --with-cracklib \
-        --enable-krbV-uam \
-        --with-pam-confdir=/etc/pam.d \
-        --with-dbus-sysconf-dir=/etc/dbus-1/system.d \
-        --with-tracker-pkgconfig-version=1.0 \
-        &&  make \
-         &&  make install \
-          &&  apt-get --quiet --yes purge --auto-remove \
-        $DEPS \
-        tracker-gui \
-        libgl1-mesa-dri \
-        &&  DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-        libevent-2.1 \
-        libavahi-client3 \
-        libevent-core-2.1 \
-        libwrap0 \
-        libtdb1 \
-        libmariadbclient-dev \
-        libcrack2 \
-        libdbus-glib-1-2 \
-        &&  apt-get --quiet --yes autoclean \
-         &&  apt-get --quiet --yes autoremove \
-          &&  apt-get --quiet --yes clean \
-           &&  rm -rf /netatalk* \
-            &&  rm -rf /usr/share/man \
-             &&  rm -rf /usr/share/doc \
-              &&  rm -rf /usr/share/icons \
-               &&  rm -rf /usr/share/poppler \
-                &&  rm -rf /usr/share/mime \
-                 &&  rm -rf /usr/share/GeoIP \
-                  &&  rm -rf /var/lib/apt/lists* \
-                   &&  mkdir /media/share
+RUN DEBFULLNAME="Instant User" DEBEMAIL="user@debian.org" dh_make -s -c gpl3 --yes --createorig
+ADD rules.add .
+RUN cat rules.add >> debian/rules
+RUN debian/rules binary
+
+FROM base
+
+RUN mkdir /media/share
+
+COPY --from=build /netatalk_*.deb /
+RUN dpkg --force-depends -i "/netatalk_${NETATALK_VERSION}-1_$(dpkg --print-architecture).deb" && apt-get install -f -y
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 COPY afp.conf /etc/afp.conf
